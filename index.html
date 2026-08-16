@@ -356,6 +356,13 @@
   .kv-label{ color: var(--text-muted); flex-shrink:0; }
   .kv-value{ font-family: var(--font-mono); font-weight:600; text-align:right; }
 
+  /* Forces a new PDF page to start at this section when exporting.
+     Has no visual effect in normal on-screen browsing. */
+  .summary-section.pdf-break{
+    page-break-before: always;
+    break-before: page;
+  }
+
   .action-row{
     display:flex; gap:10px; margin-top: 8px;
   }
@@ -484,11 +491,16 @@ function chipRow(options, selected, onSelect, extraClass){
 }
 
 /* ============================= RENDER ============================= */
-function render(){
+// scrollToTop is only true when moving between wizard steps — NOT on every
+// small in-step update (chip tap, checkbox toggle), so the page doesn't jump
+// while the person is quickly filling in data.
+function render(scrollToTop){
   updateProgress();
   const app = document.getElementById("app");
   app.innerHTML = renderStep(currentStep);
-  window.scrollTo({top:0, behavior:"instant"});
+  if(scrollToTop){
+    window.scrollTo({top:0, behavior:"instant"});
+  }
 }
 
 function updateProgress(){
@@ -524,9 +536,9 @@ function navRow(){
   `;
 }
 
-function goNext(){ if(currentStep < TOTAL_STEPS-1){ currentStep++; render(); } }
-function goBack(){ if(currentStep > 0){ currentStep--; render(); } }
-function goToStep(i){ currentStep = i; render(); }
+function goNext(){ if(currentStep < TOTAL_STEPS-1){ currentStep++; render(true); } }
+function goBack(){ if(currentStep > 0){ currentStep--; render(true); } }
+function goToStep(i){ currentStep = i; render(true); }
 
 /* ---- field update handlers (exposed globally for inline onclick/onchange) ---- */
 function setField(path, value){
@@ -536,11 +548,11 @@ function setField(path, value){
   obj[parts[parts.length-1]] = value;
 }
 function updateText(path, el){ setField(path, el.value); }
-function selectChip(path, value){ setField(path, value); render(); }
+function selectChip(path, value){ setField(path, value); render(false); }
 function toggleComorbidity(val){
   const idx = state.comorbidities.indexOf(val);
   if(idx>-1) state.comorbidities.splice(idx,1); else state.comorbidities.push(val);
-  render();
+  render(false);
 }
 
 /* ============================= STEP RENDERERS ============================= */
@@ -861,7 +873,7 @@ function summaryInnerHtml(){
       <div class="kv-row"><span class="kv-label">Decision</span><span class="kv-value">${elig || "Incomplete"}</span></div>
     </div>
 
-    <div class="summary-section">
+    <div class="summary-section pdf-break">
       <h2>Demographics & Socioeconomic</h2>
       <div class="kv-row"><span class="kv-label">Age</span><span class="kv-value">${fmt(state.age,"yrs")}</span></div>
       <div class="kv-row"><span class="kv-label">Gender</span><span class="kv-value">${fmt(state.gender)}</span></div>
@@ -882,7 +894,7 @@ function summaryInnerHtml(){
       <div class="kv-row"><span class="kv-label">Hospital Admissions (past year)</span><span class="kv-value">${fmt(state.hospitalAdmissions)}</span></div>
     </div>
 
-    <div class="summary-section">
+    <div class="summary-section pdf-break">
       <h2>Dialysis Parameters</h2>
       <div class="kv-row"><span class="kv-label">Duration on Dialysis</span><span class="kv-value">${fmt(state.dialysisDuration)} ${fmt(state.dialysisDurationUnit)}</span></div>
       <div class="kv-row"><span class="kv-label">Sessions per Week</span><span class="kv-value">${fmt(state.sessionsPerWeek)}</span></div>
@@ -949,7 +961,7 @@ function resetForm(){
     folicAcid: null, transfusion6m: null, transfusionUnits: ""
   };
   currentStep = 0;
-  render();
+  render(true);
 }
 
 /* ============================= PDF EXPORT ============================= */
@@ -979,17 +991,33 @@ function pdfLibReady(){
 
 function pdfOptions(){
   return {
-    margin: [18, 14],
+    margin: [24, 18],
     filename: pdfFilename(),
     image: { type: 'jpeg', quality: 0.98 },
     html2canvas: {
       scale: Math.min(2, window.devicePixelRatio || 2),
       useCORS: true,
       backgroundColor: '#ffffff',
-      windowWidth: document.documentElement.scrollWidth
+      // Fixed virtual window width (NOT the device's actual screen width) so
+      // the PDF is laid out consistently at a comfortable reading width
+      // whether it's generated from a phone or a desktop browser. Using the
+      // real device width here was what made phone-generated PDFs look
+      // cramped/squeezed before.
+      windowWidth: 820
     },
     jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-    pagebreak: { mode: ['avoid-all','css','legacy'] }
+    // 'css' mode honors the explicit page-break-before rule on .pdf-break
+    // sections, so pages start exactly where we want them (not wherever
+    // content happens to run out of room). 'avoid-all' was removed — it
+    // tries to keep every block intact and, when a section is taller than
+    // the remaining space on a page, shoves the whole thing onto the next
+    // page and leaves a large blank gap behind. 'avoid' below still stops
+    // small pieces (a single row, a heading) from being split mid-line.
+    pagebreak: {
+      mode: ['css', 'legacy'],
+      before: '.pdf-break',
+      avoid: ['.kv-row', '.summary-section h2', '.badge', '.summary-header']
+    }
   };
 }
 
@@ -1042,7 +1070,7 @@ async function sharePdf(evt){
 }
 
 /* ============================= INIT ============================= */
-render();
+render(true);
 </script>
 </body>
 </html>
